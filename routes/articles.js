@@ -1,7 +1,15 @@
-import { readJsonFile, writeJsonFile } from "../utils/file-utils.js";
+import { open } from "sqlite";
+import sqlite3 from "sqlite3";
 import { logError } from "../utils/logger.js";
 
-const ARTICLES_FILE = "./data/articles.json";
+const DATABASE_FILE = "./data/articles.db";
+
+async function openDb() {
+    return open({
+        filename: DATABASE_FILE,
+        driver: sqlite3.Database,
+    });
+}
 
 export async function handleRequest(req, res) {
     switch (req.method) {
@@ -47,118 +55,120 @@ export async function handleRequest(req, res) {
 
 async function getAllArticles(req, res) {
     try {
-        const data = await readJsonFile(ARTICLES_FILE);
-        res.writeHead(200);
-        res.end(JSON.stringify(data.articles));
+        const db = await openDb();
+        const articles = await db.all("SELECT * FROM articles");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(articles));
     } catch (error) {
-        await logError(error);
-        res.writeHead(500);
+        res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal Server Error" }));
     }
 }
 
 async function getArticleById(req, res, id) {
     try {
-        const data = await readJsonFile(ARTICLES_FILE);
-        const articleId = parseInt(id, 10);
-        const article = data.articles.find((a) => a.id === articleId);
-
+        const db = await openDb();
+        const article = await db.get("SELECT * FROM articles WHERE id = ?", [id]);
         if (!article) {
-            res.writeHead(404);
+            res.writeHead(404, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Article not found" }));
             return;
         }
-        res.writeHead(200);
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(article));
     } catch (error) {
         await logError(error);
-        res.writeHead(500);
+        res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal Server Error" }));
     }
 }
 
 async function createArticle(req, res) {
     try {
-        const data = await readJsonFile(ARTICLES_FILE);
+        const db = await openDb();
         const body = await parseBody(req);
 
         // Vérifier si la catégorie est vide
-        if (
-            !body.title ||
-            (body.title.trim() === "" && !body.content) ||
-            body.content.trim() === ""
-        ) {
-            res.writeHead(400);
+        if (!body.category || body.category.trim() === "") {
+            res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Category cannot be empty" }));
             return;
         }
 
-        const newArticle = { ...body, id: data.articles.length + 1 };
+        const result = await db.run(
+            "INSERT INTO articles (title, content, category) VALUES (?, ?, ?)",
+            [body.title, body.content, body.category]
+        );
 
-        data.articles.push(newArticle);
-        await writeJsonFile(ARTICLES_FILE, data);
+        const newArticle = {
+            id: result.lastID,
+            title: body.title,
+            content: body.content,
+            category: body.category,
+        };
 
-        res.writeHead(201);
+        res.writeHead(201, { "Content-Type": "application/json" });
         res.end(JSON.stringify(newArticle));
     } catch (error) {
         await logError(error);
-        res.writeHead(500);
+        res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal Server Error" }));
     }
 }
 
 async function updateArticle(req, res, id) {
     try {
-        const data = await readJsonFile(ARTICLES_FILE);
-        const articleId = parseInt(id, 10);
-        const index = data.articles.findIndex((a) => a.id === articleId);
-        if (index === -1) {
-            res.writeHead(404);
-            res.end(JSON.stringify({ error: "Article not found" }));
-            return;
-        }
+        const db = await openDb();
         const body = await parseBody(req);
 
         // Vérifier si la catégorie est vide
-        if (
-            !body.title ||
-            (body.title.trim() === "" && !body.content) ||
-            body.content.trim() === ""
-        ) {
-            res.writeHead(400);
+        if (!body.category || body.category.trim() === "") {
+            res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Category cannot be empty" }));
             return;
         }
 
-        const updatedArticle = { ...data.articles[index], ...body };
-        data.articles[index] = updatedArticle;
-        await writeJsonFile(ARTICLES_FILE, data);
-        res.writeHead(200);
+        const result = await db.run(
+            "UPDATE articles SET title = ?, content = ?, category = ? WHERE id = ?",
+            [body.title, body.content, body.category, id]
+        );
+
+        if (result.changes === 0) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Article not found" }));
+            return;
+        }
+
+        const updatedArticle = {
+            id: parseInt(id, 10),
+            title: body.title,
+            content: body.content,
+            category: body.category,
+        };
+
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(updatedArticle));
     } catch (error) {
         await logError(error);
-        res.writeHead(500);
+        res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal Server Error" }));
     }
 }
 
 async function deleteArticle(req, res, id) {
     try {
-        const data = await readJsonFile(ARTICLES_FILE);
-        const articleId = parseInt(id, 10);
-        const index = data.articles.findIndex((a) => a.id === articleId);
-        if (index === -1) {
-            res.writeHead(404);
+        const db = await openDb();
+        const result = await db.run("DELETE FROM articles WHERE id = ?", [id]);
+        if (result.changes === 0) {
+            res.writeHead(404, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Article not found" }));
             return;
         }
-        data.articles.splice(index, 1);
-        await writeJsonFile(ARTICLES_FILE, data);
         res.writeHead(204);
         res.end();
     } catch (error) {
         await logError(error);
-        res.writeHead(500);
+        res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal Server Error" }));
     }
 }

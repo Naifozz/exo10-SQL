@@ -1,6 +1,5 @@
 import http from "http";
 import { handleRequest as handleArticleRequest } from "./routes/articles.js";
-import { logRequest, logError } from "./utils/logger.js";
 
 const server = http.createServer(async (req, res) => {
     // CORS headers
@@ -16,7 +15,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Log la requête
-    await logRequest(req.method, req.url);
+    // await logRequest(req.method, req.url);
 
     try {
         if (req.url.startsWith("/articles")) {
@@ -26,7 +25,7 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ error: "Route not found" }));
         }
     } catch (error) {
-        await logError(error);
+        // await logError(error);
         res.writeHead(500);
         res.end(JSON.stringify({ error: "Internal Server Error" }));
     }
