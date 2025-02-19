@@ -1,15 +1,9 @@
 import { open } from "sqlite";
 import sqlite3 from "sqlite3";
+import { openDb } from "../utils/db.js";
 import { logError } from "../utils/logger.js";
 
 const DATABASE_FILE = "./data/articles.db";
-
-async function openDb() {
-    return open({
-        filename: DATABASE_FILE,
-        driver: sqlite3.Database,
-    });
-}
 
 export async function handleRequest(req, res) {
     switch (req.method) {
@@ -54,15 +48,10 @@ export async function handleRequest(req, res) {
 }
 
 async function getAllArticles(req, res) {
-    try {
-        const db = await openDb();
-        const articles = await db.all("SELECT * FROM articles");
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(articles));
-    } catch (error) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Internal Server Error" }));
-    }
+    const db = await openDb();
+    const articles = await db.all("SELECT * FROM articles");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(articles));
 }
 
 async function getArticleById(req, res, id) {
@@ -89,26 +78,28 @@ async function createArticle(req, res) {
         const body = await parseBody(req);
 
         // Vérifier si la catégorie est vide
-        if (!body.category || body.category.trim() === "") {
+        if (!body.title || body.title.trim() === "") {
             res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Category cannot be empty" }));
+            res.end(JSON.stringify({ error: "Title cannot be empty" }));
             return;
         }
+        if (!body.content || body.content.trim() === "") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Content cannot be empty" }));
+            return;
+        }
+        const now = new Date().toISOString();
 
-        const result = await db.run(
-            "INSERT INTO articles (title, content, category) VALUES (?, ?, ?)",
-            [body.title, body.content, body.category]
-        );
+        const result = await db.run("INSERT INTO articles (title, content) VALUES (?, ?)", [
+            body.title,
+            body.content,
+        ]);
+        const newId = result.lastID;
 
-        const newArticle = {
-            id: result.lastID,
-            title: body.title,
-            content: body.content,
-            category: body.category,
-        };
+        const createdArticle = await db.get("SELECT * FROM articles WHERE id = ?", [newId]);
 
         res.writeHead(201, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(newArticle));
+        res.end(JSON.stringify(createdArticle));
     } catch (error) {
         await logError(error);
         res.writeHead(500, { "Content-Type": "application/json" });
@@ -116,42 +107,64 @@ async function createArticle(req, res) {
     }
 }
 
-async function updateArticle(req, res, id) {
+async function updateArticle(req, res) {
     try {
+        // Extraire l'ID de façon plus fiable
+        let idStr = req.url.split("/").pop();
+        const id = parseInt(idStr, 10);
+
+        if (isNaN(id)) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "ID d'article invalide" }));
+            return;
+        }
+
         const db = await openDb();
         const body = await parseBody(req);
 
-        // Vérifier si la catégorie est vide
-        if (!body.category || body.category.trim() === "") {
+        // Validation
+        if (!body.title || body.title.trim() === "") {
             res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Category cannot be empty" }));
+            res.end(JSON.stringify({ error: "Le titre ne peut pas être vide" }));
             return;
         }
 
-        const result = await db.run(
-            "UPDATE articles SET title = ?, content = ?, category = ? WHERE id = ?",
-            [body.title, body.content, body.category, id]
-        );
+        if (!body.content || body.content.trim() === "") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Le contenu ne peut pas être vide" }));
+            return;
+        }
 
-        if (result.changes === 0) {
+        // Vérifier si l'article existe
+        const article = await db.get("SELECT * FROM articles WHERE id = ?", [id]);
+        if (!article) {
             res.writeHead(404, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Article not found" }));
+            res.end(JSON.stringify({ error: "Article non trouvé" }));
             return;
         }
 
-        const updatedArticle = {
-            id: parseInt(id, 10),
-            title: body.title,
-            content: body.content,
-            category: body.category,
-        };
+        // Mettre à jour l'article
+        await db.run("UPDATE articles SET title = ?, content = ? WHERE id = ?", [
+            body.title,
+            body.content,
+            id,
+        ]);
+
+        // Récupérer l'article mis à jour
+        const updatedArticle = await db.get("SELECT * FROM articles WHERE id = ?", [id]);
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(updatedArticle));
     } catch (error) {
+        console.error("Erreur dans updateArticle:", error);
         await logError(error);
         res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Internal Server Error" }));
+        res.end(
+            JSON.stringify({
+                error: "Erreur interne du serveur",
+                details: process.env.NODE_ENV === "development" ? error.message : undefined,
+            })
+        );
     }
 }
 

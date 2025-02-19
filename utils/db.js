@@ -12,7 +12,6 @@ export async function openDb() {
             filename: "./database.db",
             driver: sqlite3.Database,
         });
-
         // S'assurer que la table existe
         await initDb(db);
 
