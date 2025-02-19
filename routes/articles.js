@@ -8,8 +8,11 @@ const DATABASE_FILE = "./data/articles.db";
 export async function handleRequest(req, res) {
     switch (req.method) {
         case "GET":
-            if (req.url === "/articles") {
-                await getAllArticles(req, res);
+            if (req.url.startsWith("/articles")) {
+                const url = new URL(req.url, `http://${req.headers.host}`);
+                const limit = parseInt(url.searchParams.get("limit"), 10) || 10;
+                const offset = parseInt(url.searchParams.get("offset"), 10) || 0;
+                await getAllArticles(req, res, limit, offset);
             } else {
                 const id = req.url.split("/")[2];
                 await getArticleById(req, res, id);
@@ -47,11 +50,17 @@ export async function handleRequest(req, res) {
     }
 }
 
-async function getAllArticles(req, res) {
-    const db = await openDb();
-    const articles = await db.all("SELECT * FROM articles");
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(articles));
+async function getAllArticles(req, res, limit, offset) {
+    try {
+        const db = await openDb();
+        const articles = await db.all("SELECT * FROM articles LIMIT ? OFFSET ?", [limit, offset]);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(articles));
+    } catch (error) {
+        await logError(error);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal Server Error" }));
+    }
 }
 
 async function getArticleById(req, res, id) {
@@ -107,18 +116,8 @@ async function createArticle(req, res) {
     }
 }
 
-async function updateArticle(req, res) {
+async function updateArticle(req, res, id) {
     try {
-        // Extraire l'ID de façon plus fiable
-        let idStr = req.url.split("/").pop();
-        const id = parseInt(idStr, 10);
-
-        if (isNaN(id)) {
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "ID d'article invalide" }));
-            return;
-        }
-
         const db = await openDb();
         const body = await parseBody(req);
 
